@@ -32,6 +32,7 @@ const Sphere  g_spheres[] = {
     Sphere(16.5,    Vector3(73.0,          16.5,          78.0), Vector3(0.99,  0.99,  0.99), ReflectionType::Refraction,       Vector3(0, 0, 0)),
     Sphere(5.0,     Vector3(50.0,          81.6,          81.6), Vector3(),                   ReflectionType::Diffuse,          Vector3(12, 12, 12))
 };
+const int   g_lightId = 8;
 
 
 //-------------------------------------------------------------------------------------------------
@@ -106,6 +107,29 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
         {
         case ReflectionType::Diffuse:
             {
+                // Next Event Estimation
+                {
+                    const auto& light = g_spheres[g_lightId];
+
+                    const auto r1 = D_2PI * random->get_as_double();
+                    const auto r2 = 1.0 - 2.0 * random->get_as_double();
+                    const auto light_pos = light.pos + (light.radius + D_HIT_MIN) * Vector3(sqrt(1.0 - r2 * r2) * cos(r1), sqrt(1.0 - r2 * r2) * sin(r1), r2);
+
+                    double shadow_t;
+                    int    shadow_id;
+                    Ray    shadow_ray(hit_pos, normalize(light_pos - hit_pos));
+
+                    // シャドウレイを発射.
+                    auto hit = intersect_scene(shadow_ray, &shadow_t, &shadow_id);
+
+                    // ライトのみと衝突した場合のみ寄与を取る.
+                    if (hit && shadow_id == g_lightId)
+                    {
+                        L += W * light.emission * (obj.color / D_PI)  / (4.0 * D_PI * light.radius * light.radius);
+                    }
+
+                }
+
                 // 基底ベクトル.
                 Vector3 u, v, w;
 
