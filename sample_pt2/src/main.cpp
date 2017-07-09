@@ -107,6 +107,7 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
         {
         case ReflectionType::Diffuse:
             {
+                #if 1
                 // Next Event Estimation
                 {
                     const auto& light = g_spheres[g_lightId];
@@ -115,20 +116,43 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
                     const auto r2 = 1.0 - 2.0 * random->get_as_double();
                     const auto light_pos = light.pos + (light.radius + D_HIT_MIN) * Vector3(sqrt(1.0 - r2 * r2) * cos(r1), sqrt(1.0 - r2 * r2) * sin(r1), r2);
 
-                    double shadow_t;
-                    int    shadow_id;
-                    Ray    shadow_ray(hit_pos, normalize(light_pos - hit_pos));
+                    // ライトベクトル.
+                    auto light_dir   = light_pos - hit_pos;
 
-                    // シャドウレイを発射.
-                    auto hit = intersect_scene(shadow_ray, &shadow_t, &shadow_id);
+                    // ライトへの距離の2乗
+                    auto light_dist2 = dot(light_dir, light_dir);
 
-                    // ライトのみと衝突した場合のみ寄与を取る.
-                    if (hit && shadow_id == g_lightId)
+                    // 正規化.
+                    light_dir = normalize(light_dir);
+
+                    // ライトの法線ベクトル.
+                    auto light_normal = normalize(light_pos - light.pos);
+
+                    auto dot0 = dot(orienting_normal, light_dir);
+                    auto dot1 = dot(light_normal, -light_dir);
+                    auto rad2 = light.radius * light.radius;
+
+                    // 寄与が取れる場合.
+                    if (dot0 >= 0 && dot1 >= 0 && light_dist2 >= rad2)
                     {
-                        L += W * light.emission * (obj.color / D_PI)  / (4.0 * D_PI * light.radius * light.radius);
-                    }
+                        double shadow_t;
+                        int    shadow_id;
+                        Ray    shadow_ray(hit_pos, light_dir);
 
+                        // シャドウレイを発射.
+                        auto hit = intersect_scene(shadow_ray, &shadow_t, &shadow_id);
+
+                        // ライトのみと衝突した場合のみ寄与を取る.
+                        if (hit && shadow_id == g_lightId)
+                        {
+                            auto G = dot0 * dot1 / light_dist2;
+                            auto pdf = 1.0 / (4.0 * D_PI * rad2);
+
+                            L += W * light.emission * (obj.color / D_PI) * G / pdf;
+                        }
+                    }
                 }
+                #endif
 
                 // 基底ベクトル.
                 Vector3 u, v, w;
@@ -271,6 +295,7 @@ int main(int argc, char** argv)
     {
         printf_s("%.2lf%% complete\r", (double(s)/double(samples) * 100.0));
 
+        #pragma omp parallel for schedule(dynamic, 1) num_threads(4)
         for (auto y = 0; y < height; ++y)
         {
             for (auto x = 0; x < width; ++x)
