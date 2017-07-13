@@ -61,13 +61,15 @@ inline bool intersect_scene(const Ray& ray, double* t, int* id)
 //-------------------------------------------------------------------------------------------------
 //      放射輝度を求めます.
 //-------------------------------------------------------------------------------------------------
-Vector3 radiance(const Ray& input_ray, int depth, Random* random)
+Vector3 radiance(const Ray& input_ray, Random* random)
 {
     Vector3 L(0, 0, 0);
     Vector3 W(1, 1, 1);
     Ray ray(input_ray.pos, input_ray.dir);
 
-    while(true)
+    auto direct_light = true;
+
+    for(int depth=0; ; depth++)
     {
         double t;
         int   id;
@@ -90,7 +92,10 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
 
         auto p = max(obj.color.x, max(obj.color.y, obj.color.z));
 
-        L += W * obj.emission;
+        if (direct_light)
+        { L += W * obj.emission; }
+
+        direct_light = (obj.type != Diffuse);
 
         // 打ち切り深度に達したら終わり.
         if(depth > g_max_depth)
@@ -107,8 +112,8 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
         {
         case ReflectionType::Diffuse:
             {
-                #if 1
                 // Next Event Estimation
+                if (id != g_lightId)
                 {
                     const auto& light = g_spheres[g_lightId];
 
@@ -133,7 +138,7 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
                     auto rad2 = light.radius * light.radius;
 
                     // 寄与が取れる場合.
-                    if (dot0 >= 0 && dot1 >= 0 && light_dist2 >= rad2)
+                    if (dot0 >= 0 && dot1 >= 0)
                     {
                         double shadow_t;
                         int    shadow_id;
@@ -152,7 +157,6 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
                         }
                     }
                 }
-                #endif
 
                 // 基底ベクトル.
                 Vector3 u, v, w;
@@ -193,7 +197,7 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
                 const auto ddn = dot(ray.dir, orienting_normal);
                 const auto cos2t = 1.0 - nnt * nnt * (1.0 - ddn * ddn);
 
-                if (cos2t < 0.0)
+                if (cos2t <= 0.0)
                 {
                     ray = reflect_ray;
                     W *= (obj.color / p);
@@ -223,8 +227,6 @@ Vector3 radiance(const Ray& input_ray, int depth, Random* random)
             }
             break;
         }
-
-        depth++;
     }
 
     return L;
@@ -306,7 +308,7 @@ int main(int argc, char** argv)
                 auto fy = double(y) / double(height) - 0.5;
 
                 // Let's レイトレ！
-                image[idx] += radiance(camera.emit(fx, fy), 0, &random) / samples;
+                image[idx] += radiance(camera.emit(fx, fy), &random) / samples;
             }
         }
     }
