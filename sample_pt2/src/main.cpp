@@ -4,6 +4,8 @@
 // Copyright(c) Project Asura. All right reserved.
 //-------------------------------------------------------------------------------------------------
 
+#define ENABLE_NEXT_EVENT_ESTIMATION (1)
+
 //-------------------------------------------------------------------------------------------------
 // Inlcudes
 //-------------------------------------------------------------------------------------------------
@@ -12,7 +14,8 @@
 #include <r3d_shape.h>
 #include <vector>
 #include <stb/stb_image_write.h>
-
+#include <stb/stb_image.h>
+#include <algorithm>
 
 namespace {
 
@@ -67,7 +70,9 @@ Vector3 radiance(const Ray& input_ray, Random* random)
     Vector3 W(1, 1, 1);
     Ray ray(input_ray.pos, input_ray.dir);
 
+    #if ENABLE_NEXT_EVENT_ESTIMATION
     auto direct_light = true;
+    #endif
 
     for(int depth=0; ; depth++)
     {
@@ -92,10 +97,19 @@ Vector3 radiance(const Ray& input_ray, Random* random)
 
         auto p = max(obj.color.x, max(obj.color.y, obj.color.z));
 
-        if (direct_light)
-        { L += W * obj.emission; }
+        #if ENABLE_NEXT_EVENT_ESTIMATION
+        {
+            if (direct_light)
+            { L += W * obj.emission; }
 
-        direct_light = (obj.type != Diffuse);
+            direct_light = (obj.type != Diffuse);
+        }
+        #else
+        {
+            L += W * obj.emission;
+        }
+        #endif
+
 
         // 打ち切り深度に達したら終わり.
         if(depth > g_max_depth)
@@ -112,8 +126,8 @@ Vector3 radiance(const Ray& input_ray, Random* random)
         {
         case ReflectionType::Diffuse:
             {
+                #if ENABLE_NEXT_EVENT_ESTIMATION
                 // Next Event Estimation
-                if (id != g_lightId)
                 {
                     const auto& light = g_spheres[g_lightId];
 
@@ -157,6 +171,7 @@ Vector3 radiance(const Ray& input_ray, Random* random)
                         }
                     }
                 }
+                #endif
 
                 // 基底ベクトル.
                 Vector3 u, v, w;
@@ -260,6 +275,67 @@ void save_to_bmp(const char* filename, int width, int height, const double* pixe
     stbi_write_bmp(filename, width, height, 3, images.data());
 }
 
+//-------------------------------------------------------------------------------------------------
+//      中央値フィルタを適用します.
+//-------------------------------------------------------------------------------------------------
+void median_filter(int w, int h, std::vector<Vector3>& pixels)
+{
+    // BT.601 での輝度値への変換.
+    Vector3 to_lum(0.299f, 0.587f, 0.114f);
+
+    struct item
+    {
+        double luminance;
+        int    array_index;
+
+        item()
+        { /* DO_NOTHING */ }
+
+        item(double lum, int index)
+            : luminance(lum)
+            , array_index(index)
+        { /* DO_NOTHING */ }
+
+        bool operator < (const item& value)
+        { return luminance < value.luminance; }
+    };
+
+    for (auto y = 0; y < h; ++y)
+    {
+        for (auto x = 0; x < w; ++x)
+        {
+            Vector3 px[9] = {};
+            px[4] = pixels[y * w + x]; // 中央
+            px[0] = (x == 0 || y == 0)               ? px[4] : pixels[(y - 1) * w + (x - 1)];     // 左上
+            px[1] = (y == 0)                         ? px[4] : pixels[(y - 1) * w + (x + 0)];     // 上
+            px[2] = (x == (w - 1) || y == 0)         ? px[4] : pixels[(y - 1) * w + (x + 1)];     // 右上
+            px[3] = (x == 0)                         ? px[4] : pixels[(y + 0) * w + (x - 1)];     // 左
+            px[5] = (x == (w - 1))                   ? px[4] : pixels[(y + 0) * w + (x + 1)];     // 右
+            px[6] = (x == 0 || y == (h - 1))         ? px[4] : pixels[(y + 1) * w + (x - 1)];     // 左下
+            px[7] = (y == (h - 1))                   ? px[4] : pixels[(y + 1) * w + (x + 0)];     // 下
+            px[8] = (x == (w - 1) || y == (h - 1))   ? px[4] : pixels[(y + 1) * w + (x + 1)];     //　右下
+
+            // 輝度値を求める.
+            item lum[9];
+            lum[0] = item(dot(px[0], to_lum), 0);
+            lum[1] = item(dot(px[1], to_lum), 1);
+            lum[2] = item(dot(px[2], to_lum), 2);
+            lum[3] = item(dot(px[3], to_lum), 3);
+            lum[4] = item(dot(px[4], to_lum), 4);
+            lum[5] = item(dot(px[5], to_lum), 5);
+            lum[6] = item(dot(px[6], to_lum), 6);
+            lum[7] = item(dot(px[7], to_lum), 7);
+            lum[8] = item(dot(px[8], to_lum), 8);
+
+            // 並び替え.
+            std::sort(std::begin(lum), std::end(lum));
+
+            // 中央の値を採用.
+            pixels[y * w + x] = px[lum[4].array_index];
+        }
+    }
+}
+
 } // namespace
 
 
@@ -312,6 +388,9 @@ int main(int argc, char** argv)
             }
         }
     }
+
+    // 中央値フィルタを適用
+    median_filter(width, height, image);
 
     // レンダーターゲットの内容をファイルに保存.
     save_to_bmp("image.bmp", width, height, &image.data()->x);
