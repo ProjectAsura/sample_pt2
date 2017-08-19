@@ -56,6 +56,9 @@ struct Vector2
     : x(nx), y(ny)
     { /* DO_NOTHING */ }
 
+    inline Vector2 operator + () const
+    { return *this; }
+
     inline Vector2 operator - () const
     { return Vector2(-x, -y); }
 
@@ -106,6 +109,9 @@ struct Vector3
     Vector3(double nx, double ny, double nz)
     : x(nx), y(ny), z(nz)
     { /* DO_NOTHING */ }
+
+    inline Vector3 operator + () const
+    { return *this; }
 
     inline Vector3 operator - () const
     { return Vector3(-x, -y, -z); }
@@ -234,4 +240,61 @@ inline Vector3 cross(const Vector3& lhs, const Vector3& rhs)
         (lhs.x * rhs.y) - (lhs.y * rhs.x));
 }
 
+///////////////////////////////////////////////////////////////////////////////////////////////////
+// Onb structure
+///////////////////////////////////////////////////////////////////////////////////////////////////
+struct Onb
+{
+    static constexpr double Epsilon = 0.01;
 
+    Vector3 u;
+    Vector3 v;
+    Vector3 w;
+
+    Onb& FromU(const Vector3& value)
+    {
+        auto n = Vector3(1, 0, 0);
+        auto m = Vector3(0, 1, 0);
+
+        u = normalize(value);
+        v = cross(u, n);
+
+        if (length(v) < Epsilon)
+        { v = cross(u, m); }
+
+        w = cross(u, v);
+
+        return *this;
+    }
+
+    Onb& FromV(const Vector3& value)
+    {
+        auto n = Vector3(1, 0, 0);
+        auto m = Vector3(0, 1, 0);
+
+        v = normalize(value);
+        u = cross(v, n);
+
+        if (length(u) < Epsilon)
+        { u = cross(v, m); }
+
+        w = cross(u, v);
+
+        return *this;
+    }
+
+    Onb& FromW(const Vector3& value)
+    {
+        auto n = Vector3(1, 0, 0);
+        auto m = Vector3(0, 1, 0);
+
+        w = normalize(value);
+        u = cross(w, n);
+        if (length(u) < Epsilon)
+        { u = cross(w, m); }
+
+        v = cross(w, u);
+
+        return *this;
+    }
+};

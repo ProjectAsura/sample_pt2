@@ -31,8 +31,8 @@ const Sphere  g_spheres[] = {
     Sphere(1e5,     Vector3(50.0,          40.8,  -1e5 + 170.0), Vector3(0.01,  0.01,  0.01), ReflectionType::Diffuse,          Vector3(0, 0, 0)),
     Sphere(1e5,     Vector3(50.0,           1e5,          81.6), Vector3(0.75,  0.75,  0.75), ReflectionType::Diffuse,          Vector3(0, 0, 0)),
     Sphere(1e5,     Vector3(50.0,   -1e5 + 81.6,          81.6), Vector3(0.75,  0.75,  0.75), ReflectionType::Diffuse,          Vector3(0, 0, 0)),
-    Sphere(16.5,    Vector3(27.0,          16.5,          47.0), Vector3(0.75,  0.25,  0.25), ReflectionType::PerfectSpecular,  Vector3(0, 0, 0)),
-    Sphere(16.5,    Vector3(73.0,          16.5,          78.0), Vector3(0.99,  0.99,  0.99), ReflectionType::Refraction,       Vector3(0, 0, 0)),
+    Sphere(16.5,    Vector3(27.0,          16.5,          47.0), Vector3(0.75,  0.25,  0.25), ReflectionType::Diffuse,  Vector3(0, 0, 0)),
+    Sphere(16.5,    Vector3(73.0,          16.5,          78.0), Vector3(0.99,  0.99,  0.99), ReflectionType::Diffuse,       Vector3(0, 0, 0)),
     Sphere(5.0,     Vector3(50.0,          81.6,          81.6), Vector3(),                   ReflectionType::Diffuse,          Vector3(12, 12, 12))
 };
 const int   g_lightId = 8;
@@ -127,13 +127,14 @@ Vector3 radiance(const Ray& input_ray, Random* random)
         case ReflectionType::Diffuse:
             {
                 #if ENABLE_NEXT_EVENT_ESTIMATION
-                // Next Event Estimation
+                if (id != g_lightId)
                 {
                     const auto& light = g_spheres[g_lightId];
 
                     const auto r1 = D_2PI * random->get_as_double();
                     const auto r2 = 1.0 - 2.0 * random->get_as_double();
-                    const auto light_pos = light.pos + (light.radius + D_HIT_MIN) * Vector3(sqrt(1.0 - r2 * r2) * cos(r1), sqrt(1.0 - r2 * r2) * sin(r1), r2);
+                    const auto r3 = sqrt(1.0 - r2 * r2);
+                    const auto light_pos = light.pos + (light.radius + 1e-1) * normalize(Vector3(r3 * cos(r1), r3 * sin(r1), r2));
 
                     // ライトベクトル.
                     auto light_dir   = light_pos - hit_pos;
@@ -147,24 +148,23 @@ Vector3 radiance(const Ray& input_ray, Random* random)
                     // ライトの法線ベクトル.
                     auto light_normal = normalize(light_pos - light.pos);
 
-                    auto dot0 = dot(orienting_normal, light_dir);
-                    auto dot1 = dot(light_normal, -light_dir);
+                    auto dot0 = abs(dot(orienting_normal, light_dir));
+                    auto dot1 = abs(dot(light_normal,    -light_dir));
                     auto rad2 = light.radius * light.radius;
 
-                    // 寄与が取れる場合.
-                    if (dot0 >= 0 && dot1 >= 0)
+                    double shadow_t;
+                    int    shadow_id;
+                    Ray    shadow_ray(hit_pos, light_dir);
+
+                    // シャドウレイを発射.
+                    auto hit = intersect_scene(shadow_ray, &shadow_t, &shadow_id);
+
+                    // ライトのみと衝突した場合のみ寄与を取る.
                     {
-                        double shadow_t;
-                        int    shadow_id;
-                        Ray    shadow_ray(hit_pos, light_dir);
-
-                        // シャドウレイを発射.
-                        auto hit = intersect_scene(shadow_ray, &shadow_t, &shadow_id);
-
-                        // ライトのみと衝突した場合のみ寄与を取る.
-                        if (hit && shadow_id == g_lightId)
+                        auto hit_light = hit && (shadow_id == g_lightId);
+                        if (hit_light)
                         {
-                            auto G = dot0 * dot1 / light_dist2;
+                            auto G = (dot0 * dot1) / light_dist2;
                             auto pdf = 1.0 / (4.0 * D_PI * rad2);
 
                             L += W * light.emission * (obj.color / D_PI) * G / pdf;
@@ -174,20 +174,14 @@ Vector3 radiance(const Ray& input_ray, Random* random)
                 #endif
 
                 // 基底ベクトル.
-                Vector3 u, v, w;
-
-                w = orienting_normal;
-                if (abs(w.x) > 0.1)
-                { u = normalize(cross(Vector3(0, 1, 0), w)); }
-                else
-                { u = normalize(cross(Vector3(1, 0, 0), w)); }
-                v = cross(w, u);
+                Onb onb;
+                onb.FromW(orienting_normal);
 
                 const auto r1 = D_2PI * random->get_as_double();
                 const auto r2 = random->get_as_double();
                 const auto r2s = sqrt(r2);
 
-                auto dir = normalize(u * cos(r1) * r2s + v * sin(r1) * r2s + w * sqrt(1.0 - r2));
+                auto dir = normalize(onb.u * cos(r1) * r2s + onb.v * sin(r1) * r2s + onb.w * sqrt(1.0 - r2));
 
                 ray = Ray(hit_pos, dir);
                 W *= (obj.color / p);
@@ -389,8 +383,10 @@ int main(int argc, char** argv)
         }
     }
 
-    // 中央値フィルタを適用
+#if 0
+    // フィルタを適用
     median_filter(width, height, image);
+#endif
 
     // レンダーターゲットの内容をファイルに保存.
     save_to_bmp("image.bmp", width, height, &image.data()->x);
